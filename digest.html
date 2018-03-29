@@ -1,0 +1,301 @@
+
+<html>
+<head>
+<style>    
+    table {
+        border-collapse: collapse;
+    }
+
+    
+    td{
+        border: 1px solid black;
+    }
+    
+</style>    
+<script language="javascript" src="lib/jquery-1.8.3.min.js"></script>    
+<script language="javascript" src="lib/xxhash.min.js"></script>
+<script language="javascript" src="lib/js-sha1.js"></script>
+<script language="javascript" src="lib/CryptoJS-sha1.js"></script>    
+<script language="javascript" src="lib/rusha.min.js"></script>        
+<script language="javascript">
+    
+const g_algo_list = {
+    "native-sha1" : {
+        tester : crypto_sha1_tester,
+        sync : false
+    },
+    "native-sha256" : {
+        tester : crypto_sha256_tester,
+        sync : false
+    },
+    "native-sha512" : {
+        tester : crypto_sha512_tester,
+        sync : false
+    },    
+    "xxhash" : {
+        tester : xxhash_tester,
+        sync : true
+    },    
+    "RUSHA" : {
+        tester : rusha_tester,
+        sync : true
+    },
+    "JS-SHA1" : {
+        tester : js_sha1_tester,
+        sync : true
+    },
+    "CryptoJS-SHA1" : {
+        tester : CryptoJS_sha1_tester,
+        sync : true
+    },            
+}
+    
+function xxhash_tester(data){
+    return XXH.h32(0).update(data).digest();
+}
+    
+function rusha_tester(data) {
+    return Rusha.createHash().update(data).digest('hex');
+}   
+
+function js_sha1_tester(data){
+    return sha1.hex(data);
+}
+
+function CryptoJS_sha1_tester(data){
+    var inst = CryptoJS.algo.SHA1.create();
+    inst.update(arrayBufferToWordArray(data));
+    return inst.finalize().toString();
+}    
+    
+function crypto_sha1_tester(data, cb_hash, cb_error){
+    crypto.subtle.digest("SHA-1", data).then(cb_hash, cb_error);
+}
+
+function crypto_sha256_tester(data, cb_hash, cb_error){
+    crypto.subtle.digest("SHA-256", data).then(cb_hash, cb_error);
+}
+    
+function crypto_sha512_tester(data, cb_hash, cb_error){
+    crypto.subtle.digest("SHA-512", data).then(cb_hash, cb_error);
+}    
+    
+  
+function batch_test(data){
+    var g_algo_index = 0;
+    var g_active_algos = collectActiveAlgos();
+    var g_test_results = [];
+        
+    var t0, t1;
+    var cnt = 0;
+    var tbl = $("#output");
+    var total_cnt = Number($("#round").val());
+    
+    init_data_container();
+    make_single_test();
+    
+    ///////////////The following functions reisde in batch_test context because the share global variables listed above
+    function make_single_test(){
+        var algo_name = g_active_algos[g_algo_index];
+        var algo_now = g_algo_list[algo_name];
+        
+        t0 =  new Date();
+        
+        if (algo_now.sync){
+            algo_now.tester(data);
+            t1 = new Date();
+            
+            record_data(t1-t0);
+            go_to_next();
+        }
+        else{
+            try{
+                algo_now.tester(data, cb_hash, error_catcher);
+            }
+            catch (e){
+                error_catcher(e);
+            }
+        }
+    }
+
+    function cb_hash(hash){
+        t1 = new Date();   
+        record_data(t1-t0);
+        go_to_next();
+    }
+    
+    function error_catcher (err){
+        console.warn("Error: " + err);   
+        record_data(-1);
+        go_to_next();
+    }    
+    
+    function init_data_container(){
+        tbl.empty();
+        
+        $("<tr><td>Time(ms)</td></tr>").appendTo(tbl);
+        
+        for (var i = 0; i < g_active_algos.length; i++){
+            $("<tr><td>"+g_active_algos[i]+"</td></tr>").appendTo(tbl);
+        }        
+    }
+    
+    function record_data(dt){  
+        if (g_algo_index == 0){
+            tbl.find("tr").eq(0).append("<td>Round "+(cnt+1)+"</td>");    
+        }
+        
+        if (dt >= 0){
+            if (! g_test_results[g_algo_index]){
+                g_test_results[g_algo_index] = [];
+            }
+            g_test_results[g_algo_index].push(dt);
+        }
+        tbl.find("tr").eq(g_algo_index +1).append("<td>"+ (dt >= 0 ? dt : "N/A")+"</td>");
+    }
+    
+    function finalize_data(){              
+        var avg_n = Math.floor(total_cnt * 0.6 );
+        tbl.find("tr").eq(0).append("<td>Average on lowest "+avg_n+"</td>");    
+        for (var i = 0; i < g_active_algos.length; i++){
+            if (g_test_results[i]){                
+                var result = g_test_results[i];
+                //debugger;
+                result.sort(function(a,b){return a-b;});
+                var avg =  result.slice(0, avg_n).reduce(function(a,b){return a+b;}, 0)/avg_n;
+                tbl.find("tr").eq(i +1).append("<td>"+avg.toFixed(1)+"</td>");                
+                   
+            }
+            else{
+                tbl.find("tr").eq(i +1).append("<td>N/A</td>");                
+            }
+        }
+    }
+    
+    function go_to_next(){
+        g_algo_index++;        
+        if (g_algo_index < g_active_algos.length){
+            make_single_test();
+            return;
+        }
+        else{
+            g_algo_index = 0;
+            cnt ++;
+            if (cnt < total_cnt){
+                make_single_test();        
+            }
+            else{
+                finalize_data();
+                console.log("Test end");
+            }
+        }        
+    }
+}
+   
+////////////////////DOM manipulation functions   //////////////////// 
+function initSelectionList(){
+    var container = $("#selection");
+    for (var algo in g_algo_list){
+        $("<span><input type='checkbox' name='algo_sel' value='"+algo+"' checked>" + algo +"</span>").appendTo(container);        
+    }
+}
+    
+function collectActiveAlgos(){
+    return $("input[name='algo_sel']:checked").map(function(){return $(this).val();});
+}
+    
+function readFile(e){
+    var f = e.target.files[0];
+    var reader = new FileReader();
+    $("#fsize").text((f.size/1024/1024).toFixed(1));
+    
+    reader.onloadend = function(event){
+        var data = event.target.result;
+        
+        batch_test(data);
+        return;
+    }
+    
+    reader.readAsArrayBuffer(f);
+}    
+
+$(function(){
+    initSelectionList();
+    $("#fpicker").change(readFile);
+});    
+    
+/////////////////////Here below are helper functions for  CryptoJS/////////////////////////////
+    
+function hex(buffer) {
+  var hexCodes = [];
+  var view = new DataView(buffer);
+  for (var i = 0; i < view.byteLength; i += 4) {
+    // Using getUint32 reduces the number of iterations needed (we process 4 bytes each time)
+    var value = view.getUint32(i)
+    // toString(16) will give the hex representation of the number without padding
+    var stringValue = value.toString(16)
+    // We use concatenation and slice for padding
+    var padding = '00000000'
+    var paddedValue = (padding + stringValue).slice(-padding.length)
+    hexCodes.push(paddedValue);
+  }
+
+  // Join all the hex strings into one
+  return hexCodes.join("");
+}    
+    
+
+function swapendian32(val) {
+        return (((val & 0xFF) << 24)
+           | ((val & 0xFF00) << 8)
+           | ((val >> 8) & 0xFF00)
+           | ((val >> 24) & 0xFF)) >>> 0;
+
+    }
+
+    /*
+     * Horribly inefficient but unless I find another library or
+     * (re)write stuff this is the way that just makes it work (TM).
+     *
+     * Note: Since CryptoJS 3.1 this functionality is in the framework.
+     *       However it's currently slower than this juding from my tests.
+     *       See CryptoJS components/lib-typedarrays.js
+     */
+    function arrayBufferToWordArray(arrayBuffer) {
+        var fullWords = Math.floor(arrayBuffer.byteLength / 4);
+        var bytesLeft = arrayBuffer.byteLength % 4;
+
+        var u32 = new Uint32Array(arrayBuffer, 0, fullWords);
+        var u8 = new Uint8Array(arrayBuffer);
+
+        var cp = [];
+        for (var i = 0; i < fullWords; ++i) {
+            cp.push(swapendian32(u32[i]));
+        }
+
+        if (bytesLeft) {
+            var pad = 0;
+            for (var i = bytesLeft; i > 0; --i) {
+                pad = pad << 8;
+                pad += u8[u8.byteLength - i];
+            }
+
+            for (var i = 0; i < 4 - bytesLeft; ++i) {
+                pad = pad << 8;
+            }
+
+            cp.push(pad);
+        }
+
+        return CryptoJS.lib.WordArray.create(cp, arrayBuffer.byteLength);
+    };    
+</script>        
+</head>
+<body>
+    <div id="selection"></div>    
+    Round of tests: <input type="number" name="round" id="round" value="5"><br>
+    <input type="file" id="fpicker" name="fname">
+    <p>file size: <span id="fsize"></span>MB </p>    
+    <table id="output"></table>    
+</body>
+</html>
