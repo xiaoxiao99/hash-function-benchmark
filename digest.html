@@ -1,4 +1,3 @@
-
 <html>
 <head>
 <style>    
@@ -9,16 +8,24 @@
     
     td{
         border: 1px solid black;
+        color:
+    }
+    
+    td:first-child{
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     
 </style>    
 <script language="javascript" src="lib/jquery-1.8.3.min.js"></script>    
 <script language="javascript" src="lib/xxhash.min.js"></script>
-<script language="javascript" src="lib/js-sha1.js"></script>
+<script language="javascript" src="lib/sha1.min.js"></script>
 <script language="javascript" src="lib/CryptoJS-sha1.js"></script>    
 <script language="javascript" src="lib/rusha.min.js"></script>        
 <script language="javascript">
     
+const g_color_list = ["RED", "GREEN", "BLUE", "PURPLE", "NAVY", "MAROON", "OLIVE"];
 const g_algo_list = {
     "native-sha1" : {
         tester : crypto_sha1_tester,
@@ -42,7 +49,8 @@ const g_algo_list = {
     },
     "JS-SHA1" : {
         tester : js_sha1_tester,
-        sync : true
+        sync : true,
+        source: "https://github.com/emn178/js-sha1"
     },
     "CryptoJS-SHA1" : {
         tester : CryptoJS_sha1_tester,
@@ -51,7 +59,7 @@ const g_algo_list = {
 }
     
 function xxhash_tester(data){
-    return XXH.h32(0).update(data).digest();
+    return XXH.h32(0).update(data).digest().toString(16);
 }
     
 function rusha_tester(data) {
@@ -85,6 +93,8 @@ function batch_test(data){
     var g_algo_index = 0;
     var g_active_algos = collectActiveAlgos();
     var g_test_results = [];
+    var g_color_map = {};
+    var g_used_colors = 0;
         
     var t0, t1;
     var cnt = 0;
@@ -102,10 +112,10 @@ function batch_test(data){
         t0 =  new Date();
         
         if (algo_now.sync){
-            algo_now.tester(data);
+            var hash = algo_now.tester(data);
             t1 = new Date();
             
-            record_data(t1-t0);
+            record_data(t1-t0, hash);
             go_to_next();
         }
         else{
@@ -118,15 +128,15 @@ function batch_test(data){
         }
     } 
 
-    function cb_hash(hash){
+    function cb_hash(buf){
         t1 = new Date();   
-        record_data(t1-t0);
+        record_data(t1-t0, buf2string(buf));
         go_to_next();
     }
     
     function error_catcher (err){
         console.warn("Error: " + err);   
-        record_data(-1);
+        record_data(-1, "");
         go_to_next();
     }    
     
@@ -140,7 +150,7 @@ function batch_test(data){
         }        
     }
     
-    function record_data(dt){  
+    function record_data(dt, hash){  
         if (g_algo_index == 0){
             tbl.find("tr").eq(0).append("<td>Round "+(cnt+1)+"</td>");    
         }
@@ -151,7 +161,19 @@ function batch_test(data){
             }
             g_test_results[g_algo_index].push(dt);
         }
-        tbl.find("tr").eq(g_algo_index +1).append("<td>"+ (dt >= 0 ? dt : "N/A")+"</td>");
+        
+        var tr = tbl.find("tr").eq(g_algo_index +1);
+        if (! cnt){
+            if (!(hash in g_color_map)){
+                g_color_map[hash] = g_used_colors++;
+            }
+            
+            var color = g_color_list[g_color_map[hash]]; //color can be undefined if index out of range
+            var hash_span = $("<br><span>"+hash+"</span>");
+            hash_span.css("color", color).appendTo(tr.children(":first"));
+        }
+        
+        tr.append("<td>"+ (dt >= 0 ? dt : "N/A")+"</td>");
     }
     
     function finalize_data(){              
@@ -224,9 +246,8 @@ $(function(){
     $("#fpicker").change(readFile);
 });    
     
-/////////////////////Here below are helper functions for  CryptoJS/////////////////////////////
     
-function hex(buffer) {
+function buf2string(buffer) {
   var hexCodes = [];
   var view = new DataView(buffer);
   for (var i = 0; i < view.byteLength; i += 4) {
@@ -244,7 +265,41 @@ function hex(buffer) {
   return hexCodes.join("");
 }    
     
-
+/////////////////////Here below are helper functions for CryptoJS/////////////////////////////
+/*    
+function arrayBufferToWordArray(arrayBuffer) {
+    var n0 = arrayBuffer.byteLength;
+    var work_buf = arrayBuffer;
+    
+    var bytesLeft = n0 % 4;
+    if (bytesLeft){
+        var n1 = n0 -  bytesLeft + 4;
+        console.log("Make new array");
+        
+        var new_buf = new ArrayBuffer(n1);
+        var new_u8_buf = new Uint8Array(new_buf);
+        new_u8_buf.set(new Uint8Array(arrayBuffer));
+        
+        for (var i = 3; i >= bytesLeft; i--){
+            new_u8_buf[n0 + i] = 0;
+        }
+        
+        var v = new DataView(new_buf, n1-4)
+        v.setUint32(v.getUint32(false), true);        
+        
+        work_buf = new_buf;
+        n0 = n1;
+    }
+    
+    
+    var u32 = new Uint32Array(work_buf, 0, n0/4);
+    
+    var cp = u32.map(function(a, i){ return new DataView(work_buf, i*4).getUint32(0, true)});
+    
+    return CryptoJS.lib.WordArray.create(cp, n0);    
+}
+*/    
+    
 function swapendian32(val) {
         return (((val & 0xFF) << 24)
            | ((val & 0xFF00) << 8)
@@ -253,42 +308,42 @@ function swapendian32(val) {
 
     }
 
-    /*
-     * Horribly inefficient but unless I find another library or
-     * (re)write stuff this is the way that just makes it work (TM).
-     *
-     * Note: Since CryptoJS 3.1 this functionality is in the framework.
-     *       However it's currently slower than this juding from my tests.
-     *       See CryptoJS components/lib-typedarrays.js
-     */
-    function arrayBufferToWordArray(arrayBuffer) {
-        var fullWords = Math.floor(arrayBuffer.byteLength / 4);
-        var bytesLeft = arrayBuffer.byteLength % 4;
+/*
+ * Horribly inefficient but unless I find another library or
+ * (re)write stuff this is the way that just makes it work (TM).
+ *
+ * Note: Since CryptoJS 3.1 this functionality is in the framework.
+ *       However it's currently slower than this juding from my tests.
+ *       See CryptoJS components/lib-typedarrays.js
+ */
+function arrayBufferToWordArray(arrayBuffer) {
+    var fullWords = Math.floor(arrayBuffer.byteLength / 4);
+    var bytesLeft = arrayBuffer.byteLength % 4;
 
-        var u32 = new Uint32Array(arrayBuffer, 0, fullWords);
-        var u8 = new Uint8Array(arrayBuffer);
+    var u32 = new Uint32Array(arrayBuffer, 0, fullWords);
+    var u8 = new Uint8Array(arrayBuffer);
 
-        var cp = [];
-        for (var i = 0; i < fullWords; ++i) {
-            cp.push(swapendian32(u32[i]));
+    var cp = [];
+    for (var i = 0; i < fullWords; ++i) {
+        cp.push(swapendian32(u32[i]));
+    }
+
+    if (bytesLeft) {
+        var pad = 0;
+        for (var i = bytesLeft; i > 0; --i) {
+            pad = pad << 8;
+            pad += u8[u8.byteLength - i];
         }
 
-        if (bytesLeft) {
-            var pad = 0;
-            for (var i = bytesLeft; i > 0; --i) {
-                pad = pad << 8;
-                pad += u8[u8.byteLength - i];
-            }
-
-            for (var i = 0; i < 4 - bytesLeft; ++i) {
-                pad = pad << 8;
-            }
-
-            cp.push(pad);
+        for (var i = 0; i < 4 - bytesLeft; ++i) {
+            pad = pad << 8;
         }
 
-        return CryptoJS.lib.WordArray.create(cp, arrayBuffer.byteLength);
-    };    
+        cp.push(pad);
+    }
+
+    return CryptoJS.lib.WordArray.create(cp, arrayBuffer.byteLength);
+};    
 </script>        
 </head>
 <body>
