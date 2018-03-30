@@ -182,7 +182,7 @@ function batch_test(data){
             g_algo_index = 0;
             cnt ++;
             if (cnt < total_cnt){
-                make_single_test();        
+                setTimeout (make_single_test, 1);        
             }
             else{
                 finalize_data();
