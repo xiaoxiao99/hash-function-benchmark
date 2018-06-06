@@ -6,4 +6,5 @@ It is uploaded for personal use now. When have time I will clean up the code and
 If you have interest, just watch it and you will get posted when there is any update.
 
 You can play with the demo page at
+
 https://xiaoxiao99.github.io/hash-function-benchmark/digest.html
